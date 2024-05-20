@@ -6,7 +6,7 @@
 #include <pybind11/functional.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
-//#include <pybind11/chrono.h>
+#include <pybind11/chrono.h>
 
 using namespace pybind11::literals;
 
@@ -20,6 +20,9 @@ using namespace pybind11::literals;
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/sinks/stdout_sinks.h>
 #include <spdlog/sinks/tcp_sink.h>
+#include <spdlog/sinks/dist_sink.h>
+#include <spdlog/sinks/dup_filter_sink.h>
+#include <spdlog/details/null_mutex.h>
 #ifndef _WIN32
 #include <spdlog/sinks/syslog_sink.h>
 #endif
@@ -232,6 +235,64 @@ public:
     rotating_file_sink_st(const std::string& filename, size_t max_file_size, size_t max_files)
     {
         _sink = std::make_shared<spdlog::sinks::rotating_file_sink_st>(filename, max_file_size, max_files);
+    }
+};
+
+template<typename Mutex>
+class dist_sink: public Sink {
+public:
+    dist_sink() { _sink = std::make_shared<spdlog::sinks::dist_sink<Mutex>>();}
+    dist_sink(std::vector<Sink> sinks)
+    {
+        std::vector<spd::sink_ptr> sink_vec;
+        for (uint i =0; i<sinks.size(); i++)
+        {
+            sink_vec.push_back(sinks.at(i).get_sink());
+        }
+        _sink = std::make_shared<spdlog::sinks::dist_sink<Mutex>>(sink_vec);
+    }
+    void add_sink(const Sink& sink)
+    {
+        std::dynamic_pointer_cast<spdlog::sinks::dist_sink<Mutex>>(_sink)->add_sink(sink.get_sink());
+    }
+
+    void remove_sink(const Sink& sink)
+    {
+        std::dynamic_pointer_cast<spdlog::sinks::dist_sink<Mutex>>(_sink)->remove_sink(sink.get_sink());
+    }
+
+    void set_sinks(std::vector<Sink> sinks)
+    {
+        std::vector<spd::sink_ptr> sink_vec;
+        for (uint i =0; i<sinks.size(); i++)
+        {
+            sink_vec.push_back(sinks.at(i).get_sink());
+        }
+        std::dynamic_pointer_cast<spdlog::sinks::dist_sink<Mutex>>(_sink)->set_sinks(sink_vec);
+    }
+
+    std::vector<spd::sink_ptr> &sinks()
+    {
+        return std::dynamic_pointer_cast<spdlog::sinks::dist_sink<Mutex>>(_sink)->sinks();
+    }  
+};
+
+using dist_sink_mt = dist_sink<std::mutex>;
+using dist_sink_st = dist_sink<spd::details::null_mutex>;
+
+class dup_filter_sink_mt: public dist_sink_mt {
+public:
+    dup_filter_sink_mt(float max_skip_duration_sec)
+    {
+        _sink = std::make_shared<spdlog::sinks::dup_filter_sink_mt>(std::chrono::milliseconds((int)(max_skip_duration_sec*1000.0)));
+    }
+};
+
+class dup_filter_sink_st: public dist_sink_st {
+public:
+    dup_filter_sink_st(float max_skip_duration_sec)
+    {
+        _sink = std::make_shared<spdlog::sinks::dup_filter_sink_st>(std::chrono::milliseconds((int)(max_skip_duration_sec*1000.0)));
     }
 };
 
@@ -758,6 +819,28 @@ PYBIND11_MODULE(spdlog, m)
         .def(py::init<std::string, int, int>(), py::arg("filename"),
             py::arg("max_size"),
             py::arg("max_files"));
+
+    py::class_<dist_sink_mt, Sink>(m, "dist_sink_mt")
+        .def(py::init<>())
+        .def(py::init<std::vector<Sink>>(), py::arg("sinks"))
+        .def("add_sink", &dist_sink_mt::add_sink, py::arg("sink"))
+        .def("remove_sink", &dist_sink_mt::remove_sink, py::arg("sink"))
+        .def("set_sinks", &dist_sink_mt::set_sinks, py::arg("sinks"))
+        .def("sinks", &dist_sink_mt::sinks);
+
+    py::class_<dist_sink_st, Sink>(m, "dist_sink_st")
+        .def(py::init<>())
+        .def(py::init<std::vector<Sink>>(), py::arg("sinks"))
+        .def("add_sink", &dist_sink_st::add_sink, py::arg("sink"))
+        .def("remove_sink", &dist_sink_st::remove_sink, py::arg("sink"))
+        .def("set_sinks", &dist_sink_st::set_sinks, py::arg("sinks"))
+        .def("sinks", &dist_sink_st::sinks);
+
+    py::class_<dup_filter_sink_st, dist_sink_st>(m, "dup_filter_sink_st")
+        .def(py::init<float>(), py::arg("max_skip_duration_seconds"));
+
+    py::class_<dup_filter_sink_mt, dist_sink_mt>(m, "dup_filter_sink_mt")
+        .def(py::init<float>(), py::arg("max_skip_duration_seconds"));
 
     py::class_<null_sink_st, Sink>(m, "null_sink_st")
         .def(py::init<>());
