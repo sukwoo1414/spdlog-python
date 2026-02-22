@@ -67,16 +67,15 @@ setup(
     description='python wrapper around C++ spdlog logging library (https://github.com/bodgergely/spdlog-python)',
     license='MIT',
     long_description='python wrapper (https://github.com/bodgergely/spdlog-python) around C++ spdlog (http://github.com/gabime/spdlog.git) logging library.',
-    setup_requires=['pybind11>=2.2', 'wheel', 'pytest-runner'],
-    install_requires=['pybind11>=2.2'],
-    tests_require=['pytest'],
+    install_requires=['pybind11>=3.0.0'],
+    python_requires='>=3.10',
     ext_modules=[
         Extension(
             'spdlog',
             ['src/pyspdlog.cpp'],
             include_dirs=get_include_dirs(),
             libraries=link_libs(),
-            extra_compile_args=["-std=c++11", "-v"],
+            extra_compile_args=["-std=c++11"],
             language='c++11'
         )
     ],
