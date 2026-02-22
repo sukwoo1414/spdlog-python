@@ -60,7 +60,7 @@ class install_headers_subdir(install_headers):
             self.outfiles.append(out)
 
 setup(
-    name='spdlog',
+    name='spdlog_swyang',
     version='2.0.6',
     author='Gergely Bod',
     author_email='bodgergely@hotmail.com',

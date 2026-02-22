@@ -34,6 +34,9 @@ using namespace pybind11::literals;
 #include <string>
 #include <unordered_map>
 #include <vector>
+#ifndef _WIN32
+#include <signal.h>
+#endif
 
 namespace spd = spdlog;
 namespace py = pybind11;
@@ -72,6 +75,124 @@ void remove_logger_all()
     std::lock_guard<std::mutex> lck(mutex_loggers);
     g_loggers.clear();
 }
+
+#ifndef _WIN32
+struct sigaction g_previous_signal_actions[NSIG];
+volatile sig_atomic_t g_has_previous_signal_action[NSIG] = { 0 };
+std::once_flag g_install_signal_handlers_once;
+
+void flush_all_loggers_noexcept()
+{
+    try {
+        spdlog::apply_all([](const std::shared_ptr<spdlog::logger>& logger) {
+            if (logger) {
+                logger->flush();
+            }
+        });
+        // Ensure async loggers drain before process exits.
+        spdlog::shutdown();
+    } catch (...) {
+        // best effort
+    }
+}
+
+void restore_default_and_reraise(int signum)
+{
+    struct sigaction default_action = {};
+    default_action.sa_handler = SIG_DFL;
+    sigemptyset(&default_action.sa_mask);
+    default_action.sa_flags = 0;
+    sigaction(signum, &default_action, nullptr);
+    raise(signum);
+}
+
+void flush_and_forward_signal(int signum)
+{
+    flush_all_loggers_noexcept();
+
+    if (signum > 0 && signum < NSIG && g_has_previous_signal_action[signum]) {
+        const struct sigaction& previous = g_previous_signal_actions[signum];
+        if (previous.sa_handler == SIG_IGN) {
+            return;
+        }
+
+        if (previous.sa_handler == SIG_DFL) {
+            restore_default_and_reraise(signum);
+            return;
+        }
+
+        if (previous.sa_flags & SA_SIGINFO) {
+            if (previous.sa_sigaction) {
+                previous.sa_sigaction(signum, nullptr, nullptr);
+            }
+        } else if (previous.sa_handler) {
+            previous.sa_handler(signum);
+        }
+        return;
+    }
+
+    restore_default_and_reraise(signum);
+}
+
+void register_flush_handler_for_signal(int signum)
+{
+    struct sigaction current_action = {};
+    if (sigaction(signum, nullptr, &current_action) != 0) {
+        return;
+    }
+
+    if (current_action.sa_handler == SIG_IGN) {
+        return;
+    }
+
+    if (current_action.sa_handler == flush_and_forward_signal) {
+        return;
+    }
+
+    struct sigaction action = {};
+    action.sa_handler = flush_and_forward_signal;
+    sigemptyset(&action.sa_mask);
+    action.sa_flags = 0;
+
+    if (sigaction(signum, &action, nullptr) == 0 && signum > 0 && signum < NSIG) {
+        g_previous_signal_actions[signum] = current_action;
+        g_has_previous_signal_action[signum] = 1;
+    }
+}
+
+void install_flush_signal_handlers()
+{
+    std::call_once(g_install_signal_handlers_once, []() {
+#ifdef SIGHUP
+        register_flush_handler_for_signal(SIGHUP);
+#endif
+#ifdef SIGINT
+        register_flush_handler_for_signal(SIGINT);
+#endif
+#ifdef SIGQUIT
+        register_flush_handler_for_signal(SIGQUIT);
+#endif
+#ifdef SIGTERM
+        register_flush_handler_for_signal(SIGTERM);
+#endif
+#ifdef SIGABRT
+        register_flush_handler_for_signal(SIGABRT);
+#endif
+#ifdef SIGPIPE
+        register_flush_handler_for_signal(SIGPIPE);
+#endif
+#ifdef SIGALRM
+        register_flush_handler_for_signal(SIGALRM);
+#endif
+#ifdef SIGUSR1
+        register_flush_handler_for_signal(SIGUSR1);
+#endif
+#ifdef SIGUSR2
+        register_flush_handler_for_signal(SIGUSR2);
+#endif
+    });
+}
+#endif
 
 class LogLevel {
 public:
@@ -746,6 +867,10 @@ void drop_all()
 
 PYBIND11_MODULE(spdlog, m)
 {
+#ifndef _WIN32
+    install_flush_signal_handlers();
+#endif
+
     m.doc() = R"pbdoc(
         spdlog module
         -----------------------
