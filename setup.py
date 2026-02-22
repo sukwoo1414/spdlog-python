@@ -77,7 +77,7 @@ setup(
     python_requires='>=3.10',
     ext_modules=[
         Extension(
-            'spdlog',
+            'spdlog_swyang',
             ['src/pyspdlog.cpp'],
             include_dirs=get_include_dirs(),
             libraries=link_libs(),

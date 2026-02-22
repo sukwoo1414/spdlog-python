@@ -57,7 +57,7 @@ Usage
 
 ```python
 ./python
-import spdlog as spd
+import spdlog_swyang as spd
 logger = spd.FileLogger('fast_logger', '/tmp/spdlog_example.log')
 logger.set_level(spd.LogLevel.INFO)
 logger.info('Hello World!')

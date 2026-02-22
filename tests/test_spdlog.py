@@ -1,4 +1,4 @@
-import spdlog
+import spdlog_swyang as spdlog
 import unittest
 import os
 import signal
@@ -7,7 +7,7 @@ import sys
 import tempfile
 import time
 
-from spdlog import ConsoleLogger, FileLogger, RotatingLogger, DailyLogger, LogLevel
+from spdlog_swyang import ConsoleLogger, FileLogger, RotatingLogger, DailyLogger, LogLevel
     
 def set_log_level(logger, level):
     print("Setting Log level to %d" % level)
@@ -56,7 +56,7 @@ class SpdLogTest(unittest.TestCase):
             logfile = os.path.join(tmpdir, "sigterm_flush.log")
             script = (
                 "import time\n"
-                "import spdlog\n"
+                "import spdlog_swyang as spdlog\n"
                 "logger = spdlog.FileLogger('sigterm_test_logger', r'" + logfile + "', False, True)\n"
                 "logger.info('line-before-sigterm')\n"
                 "time.sleep(30)\n"

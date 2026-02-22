@@ -1,4 +1,4 @@
-import spdlog
+import spdlog_swyang as spdlog
 import time
 import os
 

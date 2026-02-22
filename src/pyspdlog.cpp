@@ -865,17 +865,17 @@ void drop_all()
 
 }
 
-PYBIND11_MODULE(spdlog, m)
+PYBIND11_MODULE(spdlog_swyang, m)
 {
 #ifndef _WIN32
     install_flush_signal_handlers();
 #endif
 
     m.doc() = R"pbdoc(
-        spdlog module
+        spdlog_swyang module
         -----------------------
 
-        .. currentmodule:: spdlog
+        .. currentmodule:: spdlog_swyang
 
         .. autosummary::
            :toctree: _generate

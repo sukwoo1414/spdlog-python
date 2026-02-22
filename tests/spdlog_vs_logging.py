@@ -1,4 +1,4 @@
-import spdlog
+import spdlog_swyang as spdlog
 import logging
 import time
 import statistics
@@ -141,7 +141,6 @@ if __name__ == "__main__":
     run_test(False)
     print("Running in spdlog in async mode")
     run_test(True)
-
 
 
 
