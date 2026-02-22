@@ -40,6 +40,34 @@ Before every commit and push:
 - Add tests for bug fixes when feasible.
 - Document non-obvious operational behavior changes in commit message.
 
+## Project-Specific Conventions
+- Python package name is `spdlog_swyang`.
+- Python import path is also `spdlog_swyang` (not `spdlog`).
+- C++ extension module name must stay aligned with packaging:
+  - `setup.py` `Extension('spdlog_swyang', ...)`
+  - `src/pyspdlog.cpp` `PYBIND11_MODULE(spdlog_swyang, m)`
+
+## Submodule Maintenance (`spdlog`)
+- `spdlog` is tracked as a git submodule and should be updated explicitly.
+- For upgrade work:
+1. Move submodule to target tag/commit.
+2. Reinstall and run tests in venv:
+   - `pip install -e . --no-build-isolation`
+   - `python -m unittest tests.test_spdlog`
+3. Run benchmark once for smoke check:
+   - `python tests/spdlog_vs_logging.py`
+4. Commit only the submodule pointer change unless wrapper code changes are required.
+
+## Logging Behavior Guarantees
+- Signal flush is implemented as best-effort for termination signals.
+- `SIGKILL` cannot be intercepted and cannot flush by design.
+- Default timestamp behavior should remain local time (`PatternTimeType.local`).
+- UTC output must be opt-in via `PatternTimeType.utc`.
+
+## Performance Evaluation Notes
+- Single-run benchmark deltas are noisy; treat small changes as inconclusive.
+- For performance decisions, prefer repeated runs (3-5) and compare averages.
+
 ## Agent Output Policy
 - Do not print secret values in terminal output summaries.
 - When referring to sensitive paths, mention path only, never file contents.
