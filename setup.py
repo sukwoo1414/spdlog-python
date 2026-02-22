@@ -16,6 +16,12 @@ def link_libs():
         libs.append("stdc++")
     return libs
 
+def get_extra_compile_args():
+    args = ["-std=c++11"]
+    if os.environ.get("SPDLOG_PYTHON_NATIVE") == "1":
+        args.append("-march=native")
+    return args
+
 class get_pybind_include(object):
     def __init__(self, user=False):
         self.user = user
@@ -75,7 +81,7 @@ setup(
             ['src/pyspdlog.cpp'],
             include_dirs=get_include_dirs(),
             libraries=link_libs(),
-            extra_compile_args=["-std=c++11"],
+            extra_compile_args=get_extra_compile_args(),
             language='c++11'
         )
     ],
