@@ -17,7 +17,9 @@ def link_libs():
     return libs
 
 def get_extra_compile_args():
-    args = ["-std=c++17", "-O3", "-march=native", "-mtune=native", "-fvisibility=hidden"]
+    args = ["-std=c++17", "-O3", "-march=native", "-mtune=native", "-fvisibility=hidden",
+            # 모든 로거가 _st(+GIL 직렬화)이므로 libc FILE 락 불필요, 패턴에 %t 미사용
+            "-DSPDLOG_FWRITE_UNLOCKED", "-DSPDLOG_NO_THREAD_ID"]
     return args
 
 class get_pybind_include(object):
@@ -65,7 +67,7 @@ class install_headers_subdir(install_headers):
 
 setup(
     name='spdlog_swyang',
-    version='2.1.0',
+    version='2.2.0',
     author='Gergely Bod',
     author_email='bodgergely@hotmail.com',
     description='python wrapper around C++ spdlog logging library (https://github.com/bodgergely/spdlog-python)',

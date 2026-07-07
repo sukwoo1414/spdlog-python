@@ -33,6 +33,9 @@ using namespace pybind11::literals;
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <spdlog/details/os.h>
+#include <chrono>
+#include <memory>
 #include <unordered_map>
 #include <vector>
 #ifndef _WIN32
@@ -474,6 +477,49 @@ public:
 };
 #endif
 
+// "%H:%M:%S.%e,%v" 전용 컴파일드 포맷터.
+// 일반 pattern_formatter는 패턴 항목(H,:,M,:,S,.,e,,,v)마다 가상호출을 하지만,
+// 이 포맷터는 초가 바뀔 때만 "HH:MM:SS." 접두사를 재계산해 캐시하고
+// 매 메시지에는 ms 3자리 + ',' + payload + '\n'만 기록한다. 출력은 완전 동일.
+class csv_time_formatter final : public spdlog::formatter {
+public:
+    void format(const spdlog::details::log_msg& msg, spdlog::memory_buf_t& dest) override {
+        using namespace std::chrono;
+        const auto tp = msg.time.time_since_epoch();
+        const auto secs = duration_cast<seconds>(tp);
+        if (secs != cached_secs_) {
+            const std::time_t tt = system_clock::to_time_t(
+                time_point<system_clock, system_clock::duration>(
+                    duration_cast<system_clock::duration>(tp)));
+            const std::tm tm = spdlog::details::os::localtime(tt);
+            prefix_[0] = static_cast<char>('0' + tm.tm_hour / 10);
+            prefix_[1] = static_cast<char>('0' + tm.tm_hour % 10);
+            prefix_[2] = ':';
+            prefix_[3] = static_cast<char>('0' + tm.tm_min / 10);
+            prefix_[4] = static_cast<char>('0' + tm.tm_min % 10);
+            prefix_[5] = ':';
+            prefix_[6] = static_cast<char>('0' + tm.tm_sec / 10);
+            prefix_[7] = static_cast<char>('0' + tm.tm_sec % 10);
+            prefix_[8] = '.';
+            cached_secs_ = secs;
+        }
+        dest.append(prefix_, prefix_ + 9);
+        const auto ms = duration_cast<milliseconds>(tp - secs).count();
+        char tail[4] = {static_cast<char>('0' + ms / 100),
+                        static_cast<char>('0' + (ms / 10) % 10),
+                        static_cast<char>('0' + ms % 10), ','};
+        dest.append(tail, tail + 4);
+        dest.append(msg.payload.begin(), msg.payload.end());
+        dest.push_back('\n');
+    }
+    std::unique_ptr<spdlog::formatter> clone() const override {
+        return std::make_unique<csv_time_formatter>();
+    }
+private:
+    std::chrono::seconds cached_secs_{-1};
+    char prefix_[9] = {};
+};
+
 class Logger {
 public:
     using async_factory_nb = spdlog::async_factory_impl<spdlog::async_overflow_policy::overrun_oldest>;
@@ -522,7 +568,12 @@ public:
 
     void set_pattern(const std::string& pattern, spd::pattern_time_type type = spd::pattern_time_type::local)
     {
-        _logger->set_pattern(pattern, type);
+        // 매매 시스템의 실전 패턴은 전용 포맷터로 자동 대체 (출력 동일, 포맷팅 비용 절감)
+        if (pattern == "%H:%M:%S.%e,%v" && type == spd::pattern_time_type::local) {
+            _logger->set_formatter(std::make_unique<csv_time_formatter>());
+        } else {
+            _logger->set_pattern(pattern, type);
+        }
     }
 
     // automatically call flush() if message level >= log_level
