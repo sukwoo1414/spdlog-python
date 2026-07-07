@@ -17,9 +17,7 @@ def link_libs():
     return libs
 
 def get_extra_compile_args():
-    args = ["-std=c++11"]
-    if os.environ.get("SPDLOG_PYTHON_NATIVE") == "1":
-        args.append("-march=native")
+    args = ["-std=c++17", "-O3", "-march=native", "-mtune=native", "-fvisibility=hidden"]
     return args
 
 class get_pybind_include(object):
@@ -67,7 +65,7 @@ class install_headers_subdir(install_headers):
 
 setup(
     name='spdlog_swyang',
-    version='2.0.6',
+    version='2.1.0',
     author='Gergely Bod',
     author_email='bodgergely@hotmail.com',
     description='python wrapper around C++ spdlog logging library (https://github.com/bodgergely/spdlog-python)',

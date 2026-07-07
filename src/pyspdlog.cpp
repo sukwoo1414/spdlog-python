@@ -32,6 +32,7 @@ using namespace pybind11::literals;
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 #ifndef _WIN32
@@ -492,13 +493,17 @@ public:
         else
             return "NULL";
     }
-    void log(int level, const std::string& msg) const { this->_logger->log((spd::level::level_enum)level, msg); }
-    void trace(const std::string& msg) const { this->_logger->trace(msg); }
-    void debug(const std::string& msg) const { this->_logger->debug(msg); }
-    void info(const std::string& msg) const { this->_logger->info(msg); }
-    void warn(const std::string& msg) const { this->_logger->warn(msg); }
-    void error(const std::string& msg) const { this->_logger->error(msg); }
-    void critical(const std::string& msg) const { this->_logger->critical(msg); }
+    // hot path: std::string_view 인자는 pybind11이 PyUnicode_AsUTF8AndSize로 파이썬 str의
+    // 내부(캐시된) UTF-8 버퍼를 직접 참조하므로 호출당 힙 할당/복사가 없다.
+    // (std::string 인자는 매 호출 malloc+memcpy를 유발)
+    static spd::string_view_t sv(std::string_view msg) { return spd::string_view_t(msg.data(), msg.size()); }
+    void log(int level, std::string_view msg) const { this->_logger->log((spd::level::level_enum)level, sv(msg)); }
+    void trace(std::string_view msg) const { this->_logger->trace(sv(msg)); }
+    void debug(std::string_view msg) const { this->_logger->debug(sv(msg)); }
+    void info(std::string_view msg) const { this->_logger->info(sv(msg)); }
+    void warn(std::string_view msg) const { this->_logger->warn(sv(msg)); }
+    void error(std::string_view msg) const { this->_logger->error(sv(msg)); }
+    void critical(std::string_view msg) const { this->_logger->critical(sv(msg)); }
 
     bool should_log(int level) const
     {
