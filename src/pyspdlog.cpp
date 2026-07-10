@@ -34,7 +34,10 @@ using namespace pybind11::literals;
 #include <string>
 #include <string_view>
 #include <spdlog/details/os.h>
+#include <charconv>
 #include <chrono>
+#include <cmath>
+#include <cstring>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -550,6 +553,120 @@ public:
     void warn(std::string_view msg) const { this->_logger->warn(sv(msg)); }
     void error(std::string_view msg) const { this->_logger->error(sv(msg)); }
     void critical(std::string_view msg) const { this->_logger->critical(sv(msg)); }
+
+    // ---- CSV 직렬화 핫패스 (파이썬 f-string 생성 비용을 C++로 내림) ----
+    // set_csv_schema("i,i,f3,f5")처럼 필드 타입을 1회 등록해두면, log_csv(*args)가
+    // 파이썬 f-string(f"{a},{b},{c:.3f},{d:.5f}")과 바이트 단위로 동일한 라인을 만든다.
+    // 토큰: "i" = 정수, "f<N>" = 고정소수점 N자리 (파이썬 {x:.Nf}와 동일).
+    // 반올림 동일성: std::to_chars(fixed)와 파이썬 포맷 모두 이진 double의 정확
+    // 반올림(correctly rounded)이라 모든 값에서 일치. NaN만 파이썬이 부호를 무시한
+    // "nan"을 쓰므로 명시 처리한다. "i" 필드에 int가 아닌 값이 오면 str(obj) 폴백.
+    struct CsvField { char kind; int prec; };
+    std::vector<CsvField> _csv_schema;
+
+    void set_csv_schema(const std::string& spec)
+    {
+        std::vector<CsvField> schema;
+        size_t pos = 0;
+        while (pos <= spec.size()) {
+            size_t end = spec.find(',', pos);
+            if (end == std::string::npos) end = spec.size();
+            const std::string tok = spec.substr(pos, end - pos);
+            if (tok == "i") {
+                schema.push_back({'i', 0});
+            } else if (tok.size() >= 2 && tok[0] == 'f') {
+                int prec = 0;
+                auto r = std::from_chars(tok.data() + 1, tok.data() + tok.size(), prec);
+                if (r.ec != std::errc() || r.ptr != tok.data() + tok.size() || prec < 0 || prec > 17)
+                    throw std::invalid_argument("set_csv_schema: bad token: " + tok);
+                schema.push_back({'f', prec});
+            } else {
+                throw std::invalid_argument("set_csv_schema: bad token: " + tok);
+            }
+            pos = end + 1;
+        }
+        _csv_schema = std::move(schema);
+    }
+
+    size_t csv_serialize(PyObject* tup, char* buf, char* bufend) const
+    {
+        const size_t n = _csv_schema.size();
+        if (n == 0)
+            throw std::runtime_error("log_csv: call set_csv_schema() first");
+        if ((size_t)PyTuple_GET_SIZE(tup) != n)
+            throw std::invalid_argument("log_csv: argument count does not match schema");
+        char* p = buf;
+        for (size_t i = 0; i < n; ++i) {
+            if (i) *p++ = ',';
+            PyObject* obj = PyTuple_GET_ITEM(tup, i);
+            const CsvField f = _csv_schema[i];
+            if (f.kind == 'f') {
+                const double d = PyFloat_AsDouble(obj);
+                if (d == -1.0 && PyErr_Occurred())
+                    throw pybind11::error_already_set();
+                if (std::isnan(d)) {  // 파이썬은 -nan도 "nan"
+                    std::memcpy(p, "nan", 3);
+                    p += 3;
+                } else {
+                    const auto r = std::to_chars(p, bufend, d, std::chars_format::fixed, f.prec);
+                    if (r.ec != std::errc())
+                        throw std::runtime_error("log_csv: line buffer overflow");
+                    p = r.ptr;
+                }
+            } else {
+                bool done = false;
+                if (PyLong_CheckExact(obj)) {
+                    int overflow = 0;
+                    const long long v = PyLong_AsLongLongAndOverflow(obj, &overflow);
+                    if (overflow == 0) {
+                        if (v == -1 && PyErr_Occurred())
+                            throw pybind11::error_already_set();
+                        const auto r = std::to_chars(p, bufend, v);
+                        if (r.ec != std::errc())
+                            throw std::runtime_error("log_csv: line buffer overflow");
+                        p = r.ptr;
+                        done = true;
+                    }
+                    // overflow: int64 초과 정수는 아래 str() 폴백으로 (f-string과 동일 출력)
+                }
+                if (!done) {
+                // 드문 경로: int64 정수가 아니면 str(obj)로 f-string의 {obj}와 바이트 동일 보장
+                PyObject* s = PyObject_Str(obj);
+                if (!s)
+                    throw pybind11::error_already_set();
+                Py_ssize_t len = 0;
+                const char* u = PyUnicode_AsUTF8AndSize(s, &len);
+                if (!u) {
+                    Py_DECREF(s);
+                    throw pybind11::error_already_set();
+                }
+                if (p + len > bufend) {
+                    Py_DECREF(s);
+                    throw std::runtime_error("log_csv: line buffer overflow");
+                }
+                std::memcpy(p, u, (size_t)len);
+                p += len;
+                Py_DECREF(s);
+                }
+            }
+        }
+        return (size_t)(p - buf);
+    }
+
+    void log_csv(pybind11::args args) const
+    {
+        char buf[4096];  // f17 x 최대 필드수에도 충분 (double fixed 최장 ~335자)
+        const size_t len = csv_serialize(args.ptr(), buf, buf + sizeof buf);
+        this->_logger->info(spd::string_view_t(buf, len));
+    }
+
+    std::string format_csv(pybind11::args args) const
+    {
+        // 검증용: log_csv가 출력할 본문(%v)을 로깅 없이 반환
+        char buf[4096];
+        const size_t len = csv_serialize(args.ptr(), buf, buf + sizeof buf);
+        return std::string(buf, len);
+    }
 
     bool should_log(int level) const
     {
@@ -1068,6 +1185,12 @@ PYBIND11_MODULE(spdlog_swyang, m)
         .def("error", &Logger::error)
         .def("critical", &Logger::critical)
         .def("name", &Logger::name)
+        .def("set_csv_schema", &Logger::set_csv_schema,
+            "CSV 필드 스키마 등록. 예: \"i,i,f3,f5\" (i=정수, fN=고정소수 N자리)")
+        .def("log_csv", &Logger::log_csv,
+            "스키마대로 인자들을 C++에서 CSV 직렬화해 INFO로 기록 (f-string과 바이트 동일)")
+        .def("format_csv", &Logger::format_csv,
+            "log_csv가 출력할 본문을 로깅 없이 반환 (검증용)")
         .def("should_log", &Logger::should_log)
         .def("set_level", &Logger::set_level)
         .def("level", &Logger::level)

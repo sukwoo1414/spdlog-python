@@ -67,7 +67,7 @@ class install_headers_subdir(install_headers):
 
 setup(
     name='spdlog_swyang',
-    version='2.2.0',
+    version='2.3.0',
     author='Gergely Bod',
     author_email='bodgergely@hotmail.com',
     description='python wrapper around C++ spdlog logging library (https://github.com/bodgergely/spdlog-python)',
