@@ -45,7 +45,8 @@ Before every commit and push:
 - Python import path is also `spdlog_swyang` (not `spdlog`).
 - C++ extension module name must stay aligned with packaging:
   - `setup.py` `Extension('spdlog_swyang', ...)`
-  - `src/pyspdlog.cpp` `PYBIND11_MODULE(spdlog_swyang, m)`
+  - `src/pyspdlog.cpp` `NB_MODULE(spdlog_swyang, m)`
+- Binding framework is nanobind (build-time dep; statically compiled into the .so via `nb_combined.cpp`). No runtime Python deps.
 
 ## Submodule Maintenance (`spdlog`)
 - `spdlog` is tracked as a git submodule and should be updated explicitly.

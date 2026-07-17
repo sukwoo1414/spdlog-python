@@ -2,13 +2,12 @@
 #define SPDLOG_ENABLE_SYSLOG
 #endif
 
-#include <pybind11/complex.h>
-#include <pybind11/functional.h>
-#include <pybind11/pybind11.h>
-#include <pybind11/stl.h>
-#include <pybind11/chrono.h>
-
-using namespace pybind11::literals;
+#include <nanobind/nanobind.h>
+#include <nanobind/stl/string.h>
+#include <nanobind/stl/string_view.h>
+#include <nanobind/stl/vector.h>
+#include <nanobind/stl/shared_ptr.h>
+#include <nanobind/stl/function.h>
 
 #include <spdlog/spdlog.h>
 #include <spdlog/async.h>
@@ -46,7 +45,7 @@ using namespace pybind11::literals;
 #endif
 
 namespace spd = spdlog;
-namespace py = pybind11;
+namespace nb = nanobind;
 
 namespace { // Avoid cluttering the global namespace.
 
@@ -542,7 +541,7 @@ public:
         else
             return "NULL";
     }
-    // hot path: std::string_view 인자는 pybind11이 PyUnicode_AsUTF8AndSize로 파이썬 str의
+    // hot path: std::string_view 인자는 nanobind가 PyUnicode_AsUTF8AndSize로 파이썬 str의
     // 내부(캐시된) UTF-8 버퍼를 직접 참조하므로 호출당 힙 할당/복사가 없다.
     // (std::string 인자는 매 호출 malloc+memcpy를 유발)
     static spd::string_view_t sv(std::string_view msg) { return spd::string_view_t(msg.data(), msg.size()); }
@@ -603,7 +602,7 @@ public:
             if (f.kind == 'f') {
                 const double d = PyFloat_AsDouble(obj);
                 if (d == -1.0 && PyErr_Occurred())
-                    throw pybind11::error_already_set();
+                    throw nb::python_error();
                 if (std::isnan(d)) {  // 파이썬은 -nan도 "nan"
                     std::memcpy(p, "nan", 3);
                     p += 3;
@@ -620,7 +619,7 @@ public:
                     const long long v = PyLong_AsLongLongAndOverflow(obj, &overflow);
                     if (overflow == 0) {
                         if (v == -1 && PyErr_Occurred())
-                            throw pybind11::error_already_set();
+                            throw nb::python_error();
                         const auto r = std::to_chars(p, bufend, v);
                         if (r.ec != std::errc())
                             throw std::runtime_error("log_csv: line buffer overflow");
@@ -633,12 +632,12 @@ public:
                 // 드문 경로: int64 정수가 아니면 str(obj)로 f-string의 {obj}와 바이트 동일 보장
                 PyObject* s = PyObject_Str(obj);
                 if (!s)
-                    throw pybind11::error_already_set();
+                    throw nb::python_error();
                 Py_ssize_t len = 0;
                 const char* u = PyUnicode_AsUTF8AndSize(s, &len);
                 if (!u) {
                     Py_DECREF(s);
-                    throw pybind11::error_already_set();
+                    throw nb::python_error();
                 }
                 if (p + len > bufend) {
                     Py_DECREF(s);
@@ -653,14 +652,14 @@ public:
         return (size_t)(p - buf);
     }
 
-    void log_csv(pybind11::args args) const
+    void log_csv(nb::args args) const
     {
         char buf[4096];  // f17 x 최대 필드수에도 충분 (double fixed 최장 ~335자)
         const size_t len = csv_serialize(args.ptr(), buf, buf + sizeof buf);
         this->_logger->info(spd::string_view_t(buf, len));
     }
 
-    std::string format_csv(pybind11::args args) const
+    std::string format_csv(nb::args args) const
     {
         // 검증용: log_csv가 출력할 본문(%v)을 로깅 없이 반환
         char buf[4096];
@@ -1038,7 +1037,7 @@ void drop_all()
 
 }
 
-PYBIND11_MODULE(spdlog_swyang, m)
+NB_MODULE(spdlog_swyang, m)
 {
 #ifndef _WIN32
     install_flush_signal_handlers();
@@ -1057,126 +1056,127 @@ PYBIND11_MODULE(spdlog_swyang, m)
            Logger
     )pbdoc";
 
-    py::class_<spd::logger, std::shared_ptr<spd::logger>>(m, "_spd_logger");
+    // nanobind는 holder 템플릿 인자가 없음 — shared_ptr는 stl/shared_ptr.h 캐스터가 처리
+    nb::class_<spd::logger>(m, "_spd_logger");
 
     m.def("set_async_mode", set_async_mode,
-        py::arg("queue_size") = 1 << 16,
-        py::arg("thread_count") = 1,
-        py::arg("overflow_policy") = 0);
+        nb::arg("queue_size") = 1 << 16,
+        nb::arg("thread_count") = 1,
+        nb::arg("overflow_policy") = 0);
 
-    py::class_<Sink>(m, "Sink")
-        .def(py::init<>())
+    nb::class_<Sink>(m, "Sink")
+        .def(nb::init<>())
         .def("set_level", &Sink::set_level);
 
-    py::class_<stdout_sink_st, Sink>(m, "stdout_sink_st")
-        .def(py::init<>());
+    nb::class_<stdout_sink_st, Sink>(m, "stdout_sink_st")
+        .def(nb::init<>());
 
-    py::class_<stdout_sink_mt, Sink>(m, "stdout_sink_mt")
-        .def(py::init<>());
+    nb::class_<stdout_sink_mt, Sink>(m, "stdout_sink_mt")
+        .def(nb::init<>());
 
-    py::class_<stdout_color_sink_st, Sink>(m, "stdout_color_sink_st")
-        .def(py::init<>());
+    nb::class_<stdout_color_sink_st, Sink>(m, "stdout_color_sink_st")
+        .def(nb::init<>());
 
-    py::class_<stdout_color_sink_mt, Sink>(m, "stdout_color_sink_mt")
-        .def(py::init<>());
+    nb::class_<stdout_color_sink_mt, Sink>(m, "stdout_color_sink_mt")
+        .def(nb::init<>());
 
-    py::class_<stderr_sink_st, Sink>(m, "stderr_sink_st")
-        .def(py::init<>());
+    nb::class_<stderr_sink_st, Sink>(m, "stderr_sink_st")
+        .def(nb::init<>());
 
-    py::class_<stderr_sink_mt, Sink>(m, "stderr_sink_mt")
-        .def(py::init<>());
+    nb::class_<stderr_sink_mt, Sink>(m, "stderr_sink_mt")
+        .def(nb::init<>());
 
-    py::class_<stderr_color_sink_st, Sink>(m, "stderr_color_sink_st")
-        .def(py::init<>());
+    nb::class_<stderr_color_sink_st, Sink>(m, "stderr_color_sink_st")
+        .def(nb::init<>());
 
-    py::class_<stderr_color_sink_mt, Sink>(m, "stderr_color_sink_mt")
-        .def(py::init<>());
+    nb::class_<stderr_color_sink_mt, Sink>(m, "stderr_color_sink_mt")
+        .def(nb::init<>());
 
-    py::class_<basic_file_sink_st, Sink>(m, "basic_file_sink_st")
-        .def(py::init<std::string, bool>(), py::arg("filename"), py::arg("truncate") = false);
+    nb::class_<basic_file_sink_st, Sink>(m, "basic_file_sink_st")
+        .def(nb::init<std::string, bool>(), nb::arg("filename"), nb::arg("truncate") = false);
 
-    py::class_<basic_file_sink_mt, Sink>(m, "basic_file_sink_mt")
-        .def(py::init<std::string, bool>(), py::arg("filename"), py::arg("truncate") = false);
+    nb::class_<basic_file_sink_mt, Sink>(m, "basic_file_sink_mt")
+        .def(nb::init<std::string, bool>(), nb::arg("filename"), nb::arg("truncate") = false);
 
-    py::class_<daily_file_sink_st, Sink>(m, "daily_file_sink_st")
-        .def(py::init<std::string, int, int>(), py::arg("filename"),
-            py::arg("rotation_hour"),
-            py::arg("rotation_minute"));
+    nb::class_<daily_file_sink_st, Sink>(m, "daily_file_sink_st")
+        .def(nb::init<std::string, int, int>(), nb::arg("filename"),
+            nb::arg("rotation_hour"),
+            nb::arg("rotation_minute"));
 
-    py::class_<daily_file_sink_mt, Sink>(m, "daily_file_sink_mt")
-        .def(py::init<std::string, int, int>(), py::arg("filename"),
-            py::arg("rotation_hour"),
-            py::arg("rotation_minute"));
+    nb::class_<daily_file_sink_mt, Sink>(m, "daily_file_sink_mt")
+        .def(nb::init<std::string, int, int>(), nb::arg("filename"),
+            nb::arg("rotation_hour"),
+            nb::arg("rotation_minute"));
 
-    py::class_<rotating_file_sink_st, Sink>(m, "rotating_file_sink_st")
-        .def(py::init<std::string, int, int>(), py::arg("filename"),
-            py::arg("max_size"),
-            py::arg("max_files"));
+    nb::class_<rotating_file_sink_st, Sink>(m, "rotating_file_sink_st")
+        .def(nb::init<std::string, int, int>(), nb::arg("filename"),
+            nb::arg("max_size"),
+            nb::arg("max_files"));
 
-    py::class_<rotating_file_sink_mt, Sink>(m, "rotating_file_sink_mt")
-        .def(py::init<std::string, int, int>(), py::arg("filename"),
-            py::arg("max_size"),
-            py::arg("max_files"));
+    nb::class_<rotating_file_sink_mt, Sink>(m, "rotating_file_sink_mt")
+        .def(nb::init<std::string, int, int>(), nb::arg("filename"),
+            nb::arg("max_size"),
+            nb::arg("max_files"));
 
-    py::class_<dist_sink_mt, Sink>(m, "dist_sink_mt")
-        .def(py::init<>())
-        .def(py::init<std::vector<Sink>>(), py::arg("sinks"))
-        .def("add_sink", &dist_sink_mt::add_sink, py::arg("sink"))
-        .def("remove_sink", &dist_sink_mt::remove_sink, py::arg("sink"))
-        .def("set_sinks", &dist_sink_mt::set_sinks, py::arg("sinks"))
+    nb::class_<dist_sink_mt, Sink>(m, "dist_sink_mt")
+        .def(nb::init<>())
+        .def(nb::init<std::vector<Sink>>(), nb::arg("sinks"))
+        .def("add_sink", &dist_sink_mt::add_sink, nb::arg("sink"))
+        .def("remove_sink", &dist_sink_mt::remove_sink, nb::arg("sink"))
+        .def("set_sinks", &dist_sink_mt::set_sinks, nb::arg("sinks"))
         .def("sinks", &dist_sink_mt::sinks);
 
-    py::class_<dist_sink_st, Sink>(m, "dist_sink_st")
-        .def(py::init<>())
-        .def(py::init<std::vector<Sink>>(), py::arg("sinks"))
-        .def("add_sink", &dist_sink_st::add_sink, py::arg("sink"))
-        .def("remove_sink", &dist_sink_st::remove_sink, py::arg("sink"))
-        .def("set_sinks", &dist_sink_st::set_sinks, py::arg("sinks"))
+    nb::class_<dist_sink_st, Sink>(m, "dist_sink_st")
+        .def(nb::init<>())
+        .def(nb::init<std::vector<Sink>>(), nb::arg("sinks"))
+        .def("add_sink", &dist_sink_st::add_sink, nb::arg("sink"))
+        .def("remove_sink", &dist_sink_st::remove_sink, nb::arg("sink"))
+        .def("set_sinks", &dist_sink_st::set_sinks, nb::arg("sinks"))
         .def("sinks", &dist_sink_st::sinks);
 
-    py::class_<dup_filter_sink_st, dist_sink_st>(m, "dup_filter_sink_st")
-        .def(py::init<float>(), py::arg("max_skip_duration_seconds"));
+    nb::class_<dup_filter_sink_st, dist_sink_st>(m, "dup_filter_sink_st")
+        .def(nb::init<float>(), nb::arg("max_skip_duration_seconds"));
 
-    py::class_<dup_filter_sink_mt, dist_sink_mt>(m, "dup_filter_sink_mt")
-        .def(py::init<float>(), py::arg("max_skip_duration_seconds"));
+    nb::class_<dup_filter_sink_mt, dist_sink_mt>(m, "dup_filter_sink_mt")
+        .def(nb::init<float>(), nb::arg("max_skip_duration_seconds"));
 
-    py::class_<null_sink_st, Sink>(m, "null_sink_st")
-        .def(py::init<>());
+    nb::class_<null_sink_st, Sink>(m, "null_sink_st")
+        .def(nb::init<>());
 
-    py::class_<null_sink_mt, Sink>(m, "null_sink_mt")
-        .def(py::init<>());
+    nb::class_<null_sink_mt, Sink>(m, "null_sink_mt")
+        .def(nb::init<>());
 
-    py::class_<tcp_sink_st, Sink>(m, "tcp_sink_st")
-        .def(py::init<std::string, int, bool>(),
-             py::arg("server_host"),
-             py::arg("server_port"),
-             py::arg("lazy_connect"));
+    nb::class_<tcp_sink_st, Sink>(m, "tcp_sink_st")
+        .def(nb::init<std::string, int, bool>(),
+             nb::arg("server_host"),
+             nb::arg("server_port"),
+             nb::arg("lazy_connect"));
 
-    py::class_<tcp_sink_mt, Sink>(m, "tcp_sink_mt")
-        .def(py::init<std::string, int, bool>(),
-             py::arg("server_host"),
-             py::arg("server_port"),
-             py::arg("lazy_connect"));
+    nb::class_<tcp_sink_mt, Sink>(m, "tcp_sink_mt")
+        .def(nb::init<std::string, int, bool>(),
+             nb::arg("server_host"),
+             nb::arg("server_port"),
+             nb::arg("lazy_connect"));
 
-    py::class_<LogLevel>(m, "LogLevel")
-        .def_property_readonly_static("TRACE", [](py::object) { return LogLevel::trace; })
-        .def_property_readonly_static("DEBUG", [](py::object) { return LogLevel::debug; })
-        .def_property_readonly_static("INFO", [](py::object) { return LogLevel::info; })
-        .def_property_readonly_static("WARN", [](py::object) { return LogLevel::warn; })
-        .def_property_readonly_static("ERR", [](py::object) { return LogLevel::err; })
-        .def_property_readonly_static("CRITICAL", [](py::object) { return LogLevel::critical; })
-        .def_property_readonly_static("OFF", [](py::object) { return LogLevel::off; });
+    nb::class_<LogLevel>(m, "LogLevel")
+        .def_prop_ro_static("TRACE", [](nb::object) { return LogLevel::trace; })
+        .def_prop_ro_static("DEBUG", [](nb::object) { return LogLevel::debug; })
+        .def_prop_ro_static("INFO", [](nb::object) { return LogLevel::info; })
+        .def_prop_ro_static("WARN", [](nb::object) { return LogLevel::warn; })
+        .def_prop_ro_static("ERR", [](nb::object) { return LogLevel::err; })
+        .def_prop_ro_static("CRITICAL", [](nb::object) { return LogLevel::critical; })
+        .def_prop_ro_static("OFF", [](nb::object) { return LogLevel::off; });
 
-    py::class_<AsyncOverflowPolicy>(m, "AsyncOverflowPolicy")
-        .def_property_readonly_static("BLOCK", [](py::object) { return AsyncOverflowPolicy::block; })
-        .def_property_readonly_static("OVERRUN_OLDEST", [](py::object) { return AsyncOverflowPolicy::overrun_oldest; });
+    nb::class_<AsyncOverflowPolicy>(m, "AsyncOverflowPolicy")
+        .def_prop_ro_static("BLOCK", [](nb::object) { return AsyncOverflowPolicy::block; })
+        .def_prop_ro_static("OVERRUN_OLDEST", [](nb::object) { return AsyncOverflowPolicy::overrun_oldest; });
 
-    py::enum_<spdlog::pattern_time_type>(m, "PatternTimeType")
+    nb::enum_<spdlog::pattern_time_type>(m, "PatternTimeType")
         .value("local", spdlog::pattern_time_type::local)
         .value("utc", spdlog::pattern_time_type::utc)
         .export_values();
 
-    py::class_<Logger>(m, "Logger")
+    nb::class_<Logger>(m, "Logger")
         .def("log", &Logger::log)
         .def("trace", &Logger::trace)
         .def("debug", &Logger::debug)
@@ -1195,7 +1195,7 @@ PYBIND11_MODULE(spdlog_swyang, m)
         .def("set_level", &Logger::set_level)
         .def("level", &Logger::level)
         .def("set_pattern", &Logger::set_pattern,
-            py::arg("pattern"), py::arg("type") = spd::pattern_time_type::local, "type refers to time format and takes 'local' or 'utc'")
+            nb::arg("pattern"), nb::arg("type") = spd::pattern_time_type::local, "type refers to time format and takes 'local' or 'utc'")
         .def("flush_on", &Logger::flush_on)
         .def("flush", &Logger::flush)
         .def("close", &Logger::close)
@@ -1204,100 +1204,100 @@ PYBIND11_MODULE(spdlog_swyang, m)
         .def("set_error_handler", &Logger::set_error_handler)
         .def("get_underlying_logger", &Logger::get_underlying_logger);
 
-    py::class_<SinkLogger, Logger>(m, "SinkLogger")
-    .def(py::init<const std::string&, const std::vector<Sink>&>(),
-        py::arg("name"),
-        py::arg("sinks"))
-    .def(py::init<const std::string&, const std::vector<Sink>&, bool>(),
-        py::arg("name"),
-        py::arg("sinks"),
-        py::arg("async_mode"));
+    nb::class_<SinkLogger, Logger>(m, "SinkLogger")
+    .def(nb::init<const std::string&, const std::vector<Sink>&>(),
+        nb::arg("name"),
+        nb::arg("sinks"))
+    .def(nb::init<const std::string&, const std::vector<Sink>&, bool>(),
+        nb::arg("name"),
+        nb::arg("sinks"),
+        nb::arg("async_mode"));
 
-py::class_<ConsoleLogger, Logger>(m, "ConsoleLogger")
-    .def(py::init<std::string, bool, bool, bool>(),
-        py::arg("name"),
-        py::arg("multithreaded") = false,
-        py::arg("stdout") = true,
-        py::arg("colored") = true)
-    .def(py::init<std::string, bool, bool, bool, bool>(),
-        py::arg("name"),
-        py::arg("multithreaded") = false,
-        py::arg("stdout") = true,
-        py::arg("colored") = true,
-        py::arg("async_mode"));
+nb::class_<ConsoleLogger, Logger>(m, "ConsoleLogger")
+    .def(nb::init<std::string, bool, bool, bool>(),
+        nb::arg("name"),
+        nb::arg("multithreaded") = false,
+        nb::arg("stdout") = true,
+        nb::arg("colored") = true)
+    .def(nb::init<std::string, bool, bool, bool, bool>(),
+        nb::arg("name"),
+        nb::arg("multithreaded") = false,
+        nb::arg("stdout") = true,
+        nb::arg("colored") = true,
+        nb::arg("async_mode"));
 
-py::class_<FileLogger, Logger>(m, "FileLogger")
-    .def(py::init<std::string, std::string, bool, bool>(),
-        py::arg("name"),
-        py::arg("filename"),
-        py::arg("multithreaded") = false,
-        py::arg("truncate") = false)
-    .def(py::init<std::string, std::string, bool, bool, bool>(),
-        py::arg("name"),
-        py::arg("filename"),
-        py::arg("multithreaded") = false,
-        py::arg("truncate") = false,
-        py::arg("async_mode"));
-py::class_<RotatingLogger, Logger>(m, "RotatingLogger")
-    .def(py::init<std::string, std::string, bool, int, int>(),
-        py::arg("name"),
-        py::arg("filename"),
-        py::arg("multithreaded"),
-        py::arg("max_file_size"),
-        py::arg("max_files"))
-    .def(py::init<std::string, std::string, bool, int, int, bool>(),
-        py::arg("name"),
-        py::arg("filename"),
-        py::arg("multithreaded"),
-        py::arg("max_file_size"),
-        py::arg("max_files"),
-        py::arg("async_mode"));
-py::class_<DailyLogger, Logger>(m, "DailyLogger")
-    .def(py::init<std::string, std::string, bool, int, int>(),
-        py::arg("name"),
-        py::arg("filename"),
-        py::arg("multithreaded") = false,
-        py::arg("hour") = 0,
-        py::arg("minute") = 0)
-    .def(py::init<std::string, std::string, bool, int, int, bool>(),
-        py::arg("name"),
-        py::arg("filename"),
-        py::arg("multithreaded") = false,
-        py::arg("hour") = 0,
-        py::arg("minute") = 0,
-        py::arg("async_mode"));
+nb::class_<FileLogger, Logger>(m, "FileLogger")
+    .def(nb::init<std::string, std::string, bool, bool>(),
+        nb::arg("name"),
+        nb::arg("filename"),
+        nb::arg("multithreaded") = false,
+        nb::arg("truncate") = false)
+    .def(nb::init<std::string, std::string, bool, bool, bool>(),
+        nb::arg("name"),
+        nb::arg("filename"),
+        nb::arg("multithreaded") = false,
+        nb::arg("truncate") = false,
+        nb::arg("async_mode"));
+nb::class_<RotatingLogger, Logger>(m, "RotatingLogger")
+    .def(nb::init<std::string, std::string, bool, int, int>(),
+        nb::arg("name"),
+        nb::arg("filename"),
+        nb::arg("multithreaded"),
+        nb::arg("max_file_size"),
+        nb::arg("max_files"))
+    .def(nb::init<std::string, std::string, bool, int, int, bool>(),
+        nb::arg("name"),
+        nb::arg("filename"),
+        nb::arg("multithreaded"),
+        nb::arg("max_file_size"),
+        nb::arg("max_files"),
+        nb::arg("async_mode"));
+nb::class_<DailyLogger, Logger>(m, "DailyLogger")
+    .def(nb::init<std::string, std::string, bool, int, int>(),
+        nb::arg("name"),
+        nb::arg("filename"),
+        nb::arg("multithreaded") = false,
+        nb::arg("hour") = 0,
+        nb::arg("minute") = 0)
+    .def(nb::init<std::string, std::string, bool, int, int, bool>(),
+        nb::arg("name"),
+        nb::arg("filename"),
+        nb::arg("multithreaded") = false,
+        nb::arg("hour") = 0,
+        nb::arg("minute") = 0,
+        nb::arg("async_mode"));
 
 //SyslogLogger(const std::string& logger_name, const std::string& ident = "", int syslog_option = 0, int syslog_facilty = (1<<3))
 #ifdef SPDLOG_ENABLE_SYSLOG
-py::class_<syslog_sink_st, Sink>(m, "syslog_sink_st")
-    .def(py::init<std::string, int, int, bool>(),
-        py::arg("ident") = "",
-        py::arg("syslog_option") = 0,
-        py::arg("syslog_facility") = (1 << 3),
-        py::arg("enable_formatting") = true);
-py::class_<syslog_sink_mt, Sink>(m, "syslog_sink_mt")
-    .def(py::init<std::string, int, int, bool>(),
-        py::arg("ident") = "",
-        py::arg("syslog_option") = 0,
-        py::arg("syslog_facility") = (1 << 3),
-        py::arg("enable_formatting") = true);
-    py::class_<SyslogLogger, Logger>(m, "SyslogLogger")
-        .def(py::init<std::string, bool, std::string, int, int>(),
-            py::arg("name"),
-            py::arg("multithreaded") = false,
-            py::arg("ident") = "",
-            py::arg("syslog_option") = 0,
-            py::arg("syslog_facility") = (1 << 3))
-        .def(py::init<std::string, bool, std::string, int, int, bool>(),
-            py::arg("name"),
-            py::arg("multithreaded") = false,
-            py::arg("ident") = "",
-            py::arg("syslog_option") = 0,
-            py::arg("syslog_facility") = (1 << 3),
-            py::arg("async_mode"));
+nb::class_<syslog_sink_st, Sink>(m, "syslog_sink_st")
+    .def(nb::init<std::string, int, int, bool>(),
+        nb::arg("ident") = "",
+        nb::arg("syslog_option") = 0,
+        nb::arg("syslog_facility") = (1 << 3),
+        nb::arg("enable_formatting") = true);
+nb::class_<syslog_sink_mt, Sink>(m, "syslog_sink_mt")
+    .def(nb::init<std::string, int, int, bool>(),
+        nb::arg("ident") = "",
+        nb::arg("syslog_option") = 0,
+        nb::arg("syslog_facility") = (1 << 3),
+        nb::arg("enable_formatting") = true);
+    nb::class_<SyslogLogger, Logger>(m, "SyslogLogger")
+        .def(nb::init<std::string, bool, std::string, int, int>(),
+            nb::arg("name"),
+            nb::arg("multithreaded") = false,
+            nb::arg("ident") = "",
+            nb::arg("syslog_option") = 0,
+            nb::arg("syslog_facility") = (1 << 3))
+        .def(nb::init<std::string, bool, std::string, int, int, bool>(),
+            nb::arg("name"),
+            nb::arg("multithreaded") = false,
+            nb::arg("ident") = "",
+            nb::arg("syslog_option") = 0,
+            nb::arg("syslog_facility") = (1 << 3),
+            nb::arg("async_mode"));
 #endif
-    m.def("get", get, py::arg("name"), py::return_value_policy::copy);
-    m.def("drop", drop, py::arg("name"));
+    m.def("get", get, nb::arg("name"), nb::rv_policy::copy);
+    m.def("drop", drop, nb::arg("name"));
     m.def("drop_all", drop_all);
 
 #ifdef VERSION_INFO

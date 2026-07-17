@@ -9,7 +9,9 @@ python wrapper around the fast C++ logger called [spdlog](https://github.com/gab
 Introduction
 ============
 
-Python wrapper (pybind11) around the C++ spdlog logging library.
+Python wrapper (nanobind) around the C++ spdlog logging library.
+
+Note: string arguments must be `str` — `bytes` is not accepted (nanobind is stricter than the previous pybind11-based versions <= 2.3.0).
 
 Why choose [spdlog](https://github.com/gabime/spdlog)?
 
@@ -43,7 +45,7 @@ or
 
 2) from github:
 
-`pip install pybind11` - if missing
+`pip install nanobind` - if missing (build-time only; not needed at runtime)
 
 ```bash
 git clone https://github.com/bodgergely/spdlog-python.git
