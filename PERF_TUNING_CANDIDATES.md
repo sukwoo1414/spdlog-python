@@ -87,14 +87,19 @@ writer)은 여전히 이 위에 얹을 수 있는 별개 카드.
 순서: unicode → long → 제네릭 str() 폴백. 원하면 "s" 스키마 토큰 신설도 가능.
 효과: 필드당 수십 ns × lob 40필드 / 난이도: 하.
 
-### B2. cold 경로 분리 + 분기 힌트
+### B2. cold 경로 분리 + 분기 힌트 — ✅ 적용됨 (2026-07-17, v2.5.0)
 - throw 사이트들을 `[[noreturn]] [[gnu::cold]]` noinline 헬퍼 함수로 추출
   (인라인 throw는 예외 객체 생성 코드를 핫루프에 심는다).
 - 에러 조건들에 `__builtin_expect(..., 0)` (unlikely) 부여.
-- str() 폴백 블록도 별도 함수로 분리(단 B1 적용 시 unicode 직행이 본선이 되므로
-  분리 대상은 "unicode도 int도 아닌" 진짜 희귀 경로만).
-목표: 핫루프 본체 1.5KB → 수백 B. GCC는 cold 속성 코드를 `.text.unlikely` 섹션으로
-분리해 i-cache 지역성이 좋아진다. / 난이도: 하.
+- str() 폴백은 **분리하지 않음** — B1 미적용 상태에선 실데이터(str 필드)의 본선.
+- 부수 수정: 콤마·"nan" 쓰기에 bounds check 추가(기존 잠재 스택 오버플로우, 코드 리뷰 지적).
+
+**결과 (v2.4.0 → v2.5.0)**: idle 벤치는 전 케이스 ±1% 노이즈 내(개선/회귀 없음,
+lob40 log_csv 2,922→2,901ns 등; spdlog_vs_logging도 동일). 구조 지표는 개선 —
+throw 4종이 핫패스에서 ~75KB 떨어진 .text 초입 unlikely 영역으로 분리
+(0x144xx vs csv_serialize 0x26f80), 핫 본체 1,526→1,469B(bounds check 추가분 상쇄),
+.text 514.8→513.4KB. **i-cache 효과는 idle에서 측정 불가 — market_collector
+실부하 perf stat으로 최종 판정 필요.**
 
 ### B3. `csv_time_formatter` 프리픽스 재계산 cold 분리
 초가 바뀔 때만 타는 "HH:MM:SS." 재계산(localtime 포함)을 unlikely + noinline
@@ -104,23 +109,12 @@ writer)은 여전히 이 위에 얹을 수 있는 별개 카드.
 
 ## C. spdlog 코어/싱크 경로
 
-### C1. 포맷터+싱크 융합 직접쓰기 싱크
-현재 레코드당 경로:
-가상호출(formatter::format) → memory_buf → 가상호출(sink::log) →
-`fwrite_unlocked`(FILE 버퍼로 memcpy) → flush_on 체크 → `fflush`(write 시스콜).
-flush_on(INFO)=레코드당 flush이므로 FILE 버퍼링이 무의미하다. 전용 싱크 하나로 융합:
-스택 버퍼에 타임스탬프+payload 조립 후 fd에 `::write()` 1회.
-- 가상 간접분기 2회 제거(BTB/i-cache에 유리), FILE 기계 제거.
-- 내구성 의미는 동일(페이지캐시까지; fsync 없음 — 현행과 같음).
-효과: 레코드당 ~100–300ns 추정 / 난이도: 중 / 리스크: EINTR·부분쓰기 루프 필요.
-
 ### C2. `-DSPDLOG_NO_ATOMIC_LEVELS`
 레벨 체크의 atomic load를 plain load로. 모든 로거가 `_st` + GIL 직렬화라 안전.
 효과: 미미하지만 공짜 / 난이도: 컴파일 플래그 1개.
 
-### C3. (비추천, 기록만) CLOCK_REALTIME_COARSE
-clock_gettime을 싸게 만들 수 있으나 ms 타임스탬프가 1–4ms로 양자화되어 데이터 품질
-훼손. vDSO 시계가 이미 ~20ns라 이득도 작음. 채택하지 말 것.
+(C1 직접쓰기 싱크는 삭제 — flush_on(INFO)은 market_collector의 일시적 설정이라
+spdlog-python 차원의 대응 대상이 아님. C3 COARSE 시계는 비추천이라 삭제.)
 
 ---
 
@@ -166,9 +160,8 @@ import 속도·i-TLB(instruction TLB) 압력 개선. 단, 정상 상태 핫루�
    핫패스를 동시에 타격. 가장 확실한 체감.
 2. **B2/B3 (cold 분리·분기 힌트)** 또는 **D1 (PGO)** — i-cache 요구에 직접 대응.
    PGO를 쓰면 B2/B3의 상당 부분이 자동화됨.
-3. **C1 (직접쓰기 싱크)** — 레코드당 잔여 고정비 축소.
-4. **D2 + C2 + D5** — 공짜 플래그류, 함께 일괄 적용.
-5. D6(BOLT)는 확장 카드. (A3는 적용 완료 — A 섹션 참고)
+3. **D2 + C2 + D5** — 공짜 플래그류, 함께 일괄 적용.
+4. D6(BOLT)는 확장 카드. (A3는 적용 완료 — A 섹션 참고)
 
 ## 검증 방법
 

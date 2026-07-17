@@ -47,6 +47,15 @@
 namespace spd = spdlog;
 namespace nb = nanobind;
 
+// B2: 에러 분기 힌트 + cold 경로 분리용 (GCC/Clang 전용, 그 외엔 no-op)
+#if defined(__GNUC__)
+#  define SPDLOG_PY_UNLIKELY(x) __builtin_expect(!!(x), 0)
+#  define SPDLOG_PY_COLD [[gnu::cold]] [[gnu::noinline]]
+#else
+#  define SPDLOG_PY_UNLIKELY(x) (x)
+#  define SPDLOG_PY_COLD
+#endif
+
 namespace { // Avoid cluttering the global namespace.
 
 class Logger;
@@ -522,6 +531,25 @@ private:
     char prefix_[9] = {};
 };
 
+// B2: 인라인 throw는 예외 객체 생성 코드를 핫루프에 심는다 — noinline cold 함수로
+// 추출해 GCC가 .text.unlikely 섹션으로 분리하게 한다(핫루프 본체 축소, i-cache 지역성).
+[[noreturn]] SPDLOG_PY_COLD void throw_csv_overflow()
+{
+    throw std::runtime_error("log_csv: line buffer overflow");
+}
+[[noreturn]] SPDLOG_PY_COLD void throw_csv_no_schema()
+{
+    throw std::runtime_error("log_csv: call set_csv_schema() first");
+}
+[[noreturn]] SPDLOG_PY_COLD void throw_csv_count_mismatch()
+{
+    throw std::invalid_argument("log_csv: argument count does not match schema");
+}
+[[noreturn]] SPDLOG_PY_COLD void throw_csv_py_error()
+{
+    throw nb::python_error();
+}
+
 class Logger {
 public:
     using async_factory_nb = spdlog::async_factory_impl<spdlog::async_overflow_policy::overrun_oldest>;
@@ -590,58 +618,66 @@ public:
     size_t csv_serialize(PyObject* tup, char* buf, char* bufend) const
     {
         const size_t n = _csv_schema.size();
-        if (n == 0)
-            throw std::runtime_error("log_csv: call set_csv_schema() first");
-        if ((size_t)PyTuple_GET_SIZE(tup) != n)
-            throw std::invalid_argument("log_csv: argument count does not match schema");
+        if (SPDLOG_PY_UNLIKELY(n == 0))
+            throw_csv_no_schema();
+        if (SPDLOG_PY_UNLIKELY((size_t)PyTuple_GET_SIZE(tup) != n))
+            throw_csv_count_mismatch();
         char* p = buf;
         for (size_t i = 0; i < n; ++i) {
-            if (i) *p++ = ',';
+            if (i) {
+                if (SPDLOG_PY_UNLIKELY(p >= bufend))
+                    throw_csv_overflow();
+                *p++ = ',';
+            }
             PyObject* obj = PyTuple_GET_ITEM(tup, i);
             const CsvField f = _csv_schema[i];
             if (f.kind == 'f') {
                 const double d = PyFloat_AsDouble(obj);
-                if (d == -1.0 && PyErr_Occurred())
-                    throw nb::python_error();
-                if (std::isnan(d)) {  // 파이썬은 -nan도 "nan"
+                if (SPDLOG_PY_UNLIKELY(d == -1.0 && PyErr_Occurred()))
+                    throw_csv_py_error();
+                if (SPDLOG_PY_UNLIKELY(std::isnan(d))) {  // 파이썬은 -nan도 "nan"
+                    if (SPDLOG_PY_UNLIKELY(p + 3 > bufend))
+                        throw_csv_overflow();
                     std::memcpy(p, "nan", 3);
                     p += 3;
                 } else {
                     const auto r = std::to_chars(p, bufend, d, std::chars_format::fixed, f.prec);
-                    if (r.ec != std::errc())
-                        throw std::runtime_error("log_csv: line buffer overflow");
+                    if (SPDLOG_PY_UNLIKELY(r.ec != std::errc()))
+                        throw_csv_overflow();
                     p = r.ptr;
                 }
             } else {
                 bool done = false;
+                // 실데이터(LS증권)는 "i" 필드에 str이 오므로 이 분기는 힌트 없이 둔다
                 if (PyLong_CheckExact(obj)) {
                     int overflow = 0;
                     const long long v = PyLong_AsLongLongAndOverflow(obj, &overflow);
                     if (overflow == 0) {
-                        if (v == -1 && PyErr_Occurred())
-                            throw nb::python_error();
+                        if (SPDLOG_PY_UNLIKELY(v == -1 && PyErr_Occurred()))
+                            throw_csv_py_error();
                         const auto r = std::to_chars(p, bufend, v);
-                        if (r.ec != std::errc())
-                            throw std::runtime_error("log_csv: line buffer overflow");
+                        if (SPDLOG_PY_UNLIKELY(r.ec != std::errc()))
+                            throw_csv_overflow();
                         p = r.ptr;
                         done = true;
                     }
                     // overflow: int64 초과 정수는 아래 str() 폴백으로 (f-string과 동일 출력)
                 }
                 if (!done) {
-                // 드문 경로: int64 정수가 아니면 str(obj)로 f-string의 {obj}와 바이트 동일 보장
+                // str(obj) 폴백: f-string의 {obj}와 바이트 동일 보장.
+                // B1 미적용 상태에선 실데이터(str 필드)의 본선이므로 cold 분리하지 않는다.
                 PyObject* s = PyObject_Str(obj);
-                if (!s)
-                    throw nb::python_error();
+                if (SPDLOG_PY_UNLIKELY(!s))
+                    throw_csv_py_error();
                 Py_ssize_t len = 0;
                 const char* u = PyUnicode_AsUTF8AndSize(s, &len);
-                if (!u) {
+                if (SPDLOG_PY_UNLIKELY(!u)) {
                     Py_DECREF(s);
-                    throw nb::python_error();
+                    throw_csv_py_error();
                 }
-                if (p + len > bufend) {
+                if (SPDLOG_PY_UNLIKELY(p + len > bufend)) {
                     Py_DECREF(s);
-                    throw std::runtime_error("log_csv: line buffer overflow");
+                    throw_csv_overflow();
                 }
                 std::memcpy(p, u, (size_t)len);
                 p += len;
