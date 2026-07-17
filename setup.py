@@ -22,7 +22,10 @@ def get_extra_compile_args():
             # 모든 로거가 _st(+GIL 직렬화)이므로 libc FILE 락 불필요, 패턴에 %t 미사용
             "-DSPDLOG_FWRITE_UNLOCKED", "-DSPDLOG_NO_THREAD_ID",
             # C2: 레벨 로드를 atomic→plain으로. 레벨 변경은 셋업 시점(GIL)뿐이라 안전
-            "-DSPDLOG_NO_ATOMIC_LEVELS"]
+            "-DSPDLOG_NO_ATOMIC_LEVELS",
+            # D2: CPython API 호출의 PLT 스텁 제거 / -fPIC에서 DSO 내부 직접호출·인라인
+            # 허용 / 인라인 함수 심볼 은닉
+            "-fno-plt", "-fno-semantic-interposition", "-fvisibility-inlines-hidden"]
     return args
 
 def nanobind_root():
@@ -95,7 +98,7 @@ class install_headers_subdir(install_headers):
 
 setup(
     name='spdlog_swyang',
-    version='2.6.0',
+    version='2.7.0',
     author='Gergely Bod',
     author_email='bodgergely@hotmail.com',
     description='python wrapper around C++ spdlog logging library (https://github.com/bodgergely/spdlog-python)',

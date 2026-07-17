@@ -130,11 +130,16 @@ GCC가 실측 기반으로 hot/cold 블록 분할(`.text.unlikely`), 블록 재�
 수행 — i-cache 미스에 가장 직접적인 정공법. B2/B3 수작업의 상당 부분을 자동화.
 난이도: 빌드 파이프라인 2단계화(setup.py에 프로파일 빌드 경로 추가).
 
-### D2. 공짜 플래그 묶음
+### D2. 공짜 플래그 묶음 — ✅ 적용됨 (2026-07-17, v2.7.0)
 - `-fno-plt`: CPython API 호출마다 타는 PLT(Procedure Linkage Table, 공유라이브러리
   외부 함수 호출용 간접점프 스텁) 제거.
 - `-fno-semantic-interposition`: -fPIC로 막히는 DSO 내부 직접호출/인라인 허용.
 - `-fvisibility-inlines-hidden`: 인라인 함수 심볼 은닉(이미 `-fvisibility=hidden`은 적용됨).
+
+**결과 (v2.6.0 → v2.7.0)**: idle 벤치 전 케이스 ±2% 노이즈 내(lob40 log_csv
+2,901→2,906ns, spdlog_vs_logging sync 10B 1.76→1.75µs 등) — PLT 스텁 제거분(호출당
+~1ns대)은 idle에서 노이즈에 묻힘. 회귀 없음, 간접점프 제거는 BTB/i-cache 위생
+차원에서 유지. pytest 4/4·바이트 동일성 15케이스 통과.
 
 ### D3. 사용 안 하는 바인딩 다이어트
 tcp/syslog/daily/rotating/dup_filter/dist/console 싱크류, `set_error_handler`
@@ -164,8 +169,8 @@ import 속도·i-TLB(instruction TLB) 압력 개선. 단, 정상 상태 핫루�
    핫패스를 동시에 타격. 가장 확실한 체감.
 2. **B2/B3 (cold 분리·분기 힌트)** 또는 **D1 (PGO)** — i-cache 요구에 직접 대응.
    PGO를 쓰면 B2/B3의 상당 부분이 자동화됨.
-3. **D2 + C2 + D5** — 공짜 플래그류, 함께 일괄 적용.
-4. D6(BOLT)는 확장 카드. (A3는 적용 완료 — A 섹션 참고)
+3. **D5 (strip)** — 남은 공짜 항목. (D2·C2는 적용 완료)
+4. D6(BOLT)는 확장 카드. (A3·B2는 적용 완료 — 각 섹션 참고)
 
 ## 검증 방법
 
