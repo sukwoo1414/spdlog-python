@@ -20,7 +20,9 @@ def get_extra_compile_args():
             # nanobind CMake 기본과 동일: 바인딩 코드에는 스택 프로텍터 불필요
             "-fno-stack-protector",
             # 모든 로거가 _st(+GIL 직렬화)이므로 libc FILE 락 불필요, 패턴에 %t 미사용
-            "-DSPDLOG_FWRITE_UNLOCKED", "-DSPDLOG_NO_THREAD_ID"]
+            "-DSPDLOG_FWRITE_UNLOCKED", "-DSPDLOG_NO_THREAD_ID",
+            # C2: 레벨 로드를 atomic→plain으로. 레벨 변경은 셋업 시점(GIL)뿐이라 안전
+            "-DSPDLOG_NO_ATOMIC_LEVELS"]
     return args
 
 def nanobind_root():
@@ -93,7 +95,7 @@ class install_headers_subdir(install_headers):
 
 setup(
     name='spdlog_swyang',
-    version='2.5.0',
+    version='2.6.0',
     author='Gergely Bod',
     author_email='bodgergely@hotmail.com',
     description='python wrapper around C++ spdlog logging library (https://github.com/bodgergely/spdlog-python)',

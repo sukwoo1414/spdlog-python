@@ -109,9 +109,13 @@ throw 4종이 핫패스에서 ~75KB 떨어진 .text 초입 unlikely 영역으로
 
 ## C. spdlog 코어/싱크 경로
 
-### C2. `-DSPDLOG_NO_ATOMIC_LEVELS`
-레벨 체크의 atomic load를 plain load로. 모든 로거가 `_st` + GIL 직렬화라 안전.
-효과: 미미하지만 공짜 / 난이도: 컴파일 플래그 1개.
+### C2. `-DSPDLOG_NO_ATOMIC_LEVELS` — ✅ 적용됨 (2026-07-17, v2.6.0)
+레벨 체크의 atomic load를 plain load로. 모든 로거가 `_st` + GIL 직렬화라 안전
+(레벨 변경은 셋업 시점뿐).
+
+**결과 (v2.5.0 → v2.6.0)**: idle 벤치 전 케이스 ±2% 노이즈 내 — x86에서 atomic
+load는 어차피 plain mov라 예상대로 측정 가능한 차이 없음. 컴파일러 재배치 자유도
+확보 차원의 공짜 플래그로 유지. pytest 4/4·바이트 동일성 15케이스 통과.
 
 (C1 직접쓰기 싱크는 삭제 — flush_on(INFO)은 market_collector의 일시적 설정이라
 spdlog-python 차원의 대응 대상이 아님. C3 COARSE 시계는 비추천이라 삭제.)
