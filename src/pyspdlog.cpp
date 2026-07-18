@@ -381,7 +381,7 @@ public:
     dist_sink(std::vector<Sink> sinks)
     {
         std::vector<spd::sink_ptr> sink_vec;
-        for (uint i =0; i<sinks.size(); i++)
+        for (size_t i = 0; i < sinks.size(); i++)
         {
             sink_vec.push_back(sinks.at(i).get_sink());
         }
@@ -400,7 +400,7 @@ public:
     void set_sinks(std::vector<Sink> sinks)
     {
         std::vector<spd::sink_ptr> sink_vec;
-        for (uint i =0; i<sinks.size(); i++)
+        for (size_t i = 0; i < sinks.size(); i++)
         {
             sink_vec.push_back(sinks.at(i).get_sink());
         }

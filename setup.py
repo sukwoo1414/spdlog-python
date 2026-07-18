@@ -1,5 +1,6 @@
 import os
 import platform
+import sys
 
 from setuptools import setup
 from setuptools.extension import Extension
@@ -15,17 +16,32 @@ def link_libs():
         libs.append("stdc++")
     return libs
 
+def arch_tuning_args():
+    # x86 계열은 -march=native, ARM64는 -mcpu=native가 관용 표기
+    # (Apple clang 등 일부 ARM64 툴체인은 -march=native를 거부한다)
+    machine = platform.machine().lower()
+    if machine in ("x86_64", "amd64", "i686", "i386"):
+        return ["-march=native", "-mtune=native"]
+    if machine in ("aarch64", "arm64"):
+        return ["-mcpu=native"]
+    return []
+
 def get_extra_compile_args():
-    args = ["-std=c++17", "-O3", "-march=native", "-mtune=native", "-fvisibility=hidden",
+    args = arch_tuning_args()
+    args += ["-std=c++17", "-O3", "-fvisibility=hidden",
             # nanobind CMake 기본과 동일: 바인딩 코드에는 스택 프로텍터 불필요
             "-fno-stack-protector",
-            # 모든 로거가 _st(+GIL 직렬화)이므로 libc FILE 락 불필요, 패턴에 %t 미사용
-            "-DSPDLOG_FWRITE_UNLOCKED", "-DSPDLOG_NO_THREAD_ID",
+            # 모든 로거가 _st(+GIL 직렬화)이므로 %t 미사용
+            "-DSPDLOG_NO_THREAD_ID",
             # C2: 레벨 로드를 atomic→plain으로. 레벨 변경은 셋업 시점(GIL)뿐이라 안전
             "-DSPDLOG_NO_ATOMIC_LEVELS",
             # D2: CPython API 호출의 PLT 스텁 제거 / -fPIC에서 DSO 내부 직접호출·인라인
             # 허용 / 인라인 함수 심볼 은닉
             "-fno-plt", "-fno-semantic-interposition", "-fvisibility-inlines-hidden"]
+    if sys.platform != "darwin":
+        # libc FILE 락 우회 (모든 로거 _st + GIL 직렬화라 안전).
+        # fwrite_unlocked는 GNU 확장 — Darwin/BSD libc엔 없어 게이트 (spdlog os-inl.h)
+        args.append("-DSPDLOG_FWRITE_UNLOCKED")
     return args
 
 def nanobind_root():
@@ -54,7 +70,7 @@ class build_ext_nanobind(build_ext):
     nanobind의 CMake 래퍼(nanobind_add_module)가 기본으로 하는 크기 최적화를 재현한다.
     디스패치 코드는 작을수록 i-cache에 유리하고, 우리 핫패스(pyspdlog.cpp)는 -O3 유지.
     """
-    _strip_for_nb = {"-O3", "-march=native", "-mtune=native"}
+    _strip_for_nb = {"-O3", "-march=native", "-mtune=native", "-mcpu=native"}
 
     def build_extensions(self):
         original_compile = self.compiler._compile
@@ -98,7 +114,7 @@ class install_headers_subdir(install_headers):
 
 setup(
     name='spdlog_swyang',
-    version='2.7.0',
+    version='2.7.1',
     author='Gergely Bod',
     author_email='bodgergely@hotmail.com',
     description='python wrapper around C++ spdlog logging library (https://github.com/bodgergely/spdlog-python)',
